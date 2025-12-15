@@ -11,3 +11,13 @@ def create_app(config_class='config'):
     db.init_app(app)
     
     return app
+
+# Importar todos los modelos para que SQLAlchemy los registre
+from models.user import User
+from models.services import Services
+from models.serviceDescription import ServiceDescription
+from models.appointment import Appointments
+from models.review import Review
+from models.portfolioService import PortfolioService
+
+__all__ = ['db', 'User', 'Services', 'ServiceDescription', 'Appointments', 'Review', 'PortfolioService']
