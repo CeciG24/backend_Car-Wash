@@ -4,7 +4,7 @@ from app import mail
 
 contacts_bp = Blueprint('contacts', __name__, url_prefix='/contacts')
 
-@contacts_bp.route("/", methods=['POST'])
+@contacts_bp.route("", methods=['POST'])
 def post_contact():
     try:
         data = request.get_json()
@@ -30,7 +30,7 @@ Mensaje:
 {detalles}
 
 ---
-Este mensaje fue enviado desde el formulario de contacto de Car Wash App.
+Este mensaje fue enviado desde el formulario de contacto de la pagina web.de ls1713
             """
         )
         
