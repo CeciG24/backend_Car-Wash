@@ -31,11 +31,12 @@ def require_admin():
 def protect_routes():
     if request.method == "OPTIONS" or request.endpoint is None:
         return
-    private = request.blueprint == "charts"
+    private = request.blueprint in ("charts", "materials")
     private |= request.blueprint == "appointments" and request.method != "POST"
     private |= request.blueprint in ("services", "portfolio") and request.method not in ("GET", "HEAD")
     private |= request.blueprint == "reviews" and request.method not in ("GET", "HEAD", "POST")
     private |= request.endpoint in ("auth.register", "auth.me")
     if private:
         require_admin()
+
 

@@ -35,8 +35,8 @@ individual del token en el servidor. Quitar un correo de ADMIN_EMAILS y reinicia
 el proceso retira su acceso; rotar SECRET_KEY invalida todas las sesiones.
 
 POST /register está protegido. La primera cuenta se crea desde el comando local.
-No hay pantallas administrativas en esta entrega. La carpeta frontend-adminpanel
-contiene un esqueleto con imports a pantallas todavía inexistentes.
+El panel administrativo está implementado en frontend-adminpanel. Consulta su
+README para ejecución, publicación y configuración del origen en CORS_ORIGINS.
 
 ## Contratos principales
 
@@ -62,6 +62,15 @@ contiene un esqueleto con imports a pantallas todavía inexistentes.
   calificacion (entero de 1 a 5). PUT/DELETE /reviews/:id son privados.
 - POST /contacts: nombre, numero, detalles. Requiere correo configurado.
 - GET /charts/*: privado.
+- GET/POST /materials y GET/PUT/DELETE /materials/:id: privados.
+  Campos: name, purpose, category (Químico/Herramienta/Consumible), unit
+  (ml/L/g/kg/piezas), quantity inicial, minimum, notes, active y dilutions.
+  Cada dilución contiene use, product, water e instructions (partes producto:agua).
+- GET/POST /materials/:id/movements: privados. POST recibe kind
+  (entrada/salida), quantity positiva y note. Devuelve el material actualizado.
+  Las existencias admiten tres decimales y se actualizan atómicamente para evitar
+  saldos negativos. La cantidad no se modifica desde PUT /materials/:id.
+  Un material con movimientos se desactiva: no puede eliminarse ni cambiar de unidad.
 
 Los errores se devuelven como { error: "mensaje" }; las validaciones usan 400,
 las sesiones 401/403, registros ausentes 404 y conflictos 409.
@@ -70,8 +79,10 @@ se consideran UTC; si se almacenaron con hora local, necesitan revisión antes
 de convertirlos. No se han modificado registros históricos.
 
 Los modelos existentes se conservan; create_all crea tablas ausentes, pero no
-migra tablas existentes. Inventario, estados de publicación de videos, cupos de
-agenda y migraciones de esquema quedan para sus módulos posteriores.
+migra tablas existentes. El inventario agrega materials y stock_movements;
+es necesario desplegar el backend actualizado antes de usarlo desde el panel.
+Estados de publicación de videos, cupos de agenda y migraciones de esquema
+quedan para sus módulos posteriores.
 
 ## Pruebas
 

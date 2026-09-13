@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify
 from models import db
-from models.appointment import Appointments, statusEnum
+from models.appointment import Appointments, AppointmentPrice, statusEnum
 from models.services import Services
 from validation import payload, text, date_value, existing, enum_value
 
@@ -13,7 +13,10 @@ def apply_data(item, data, creating=False):
     if creating or "scheduled_date" in data:
         item.scheduled_date = date_value(data.get("scheduled_date"), future=True)
     if creating or "id_service" in data:
-        item.id_service = existing(Services, data.get("id_service")).id_service
+        service = existing(Services, data.get("id_service"))
+        if creating or service.id_service != item.id_service:
+            item.pricing = AppointmentPrice(amount=service.price)
+        item.id_service = service.id_service
     if not creating and "status" in data:
         item.status = enum_value(statusEnum, data["status"], "status")
 

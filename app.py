@@ -22,7 +22,8 @@ def create_app(test_config=None):
     from routes.contacts import contacts_bp
     from routes.auth import users_bp, register_commands
     from routes.charts import charts_bp
-    for blueprint in (services_bp, appointments_bp, reviews_bp, portfolio_bp, contacts_bp, users_bp, charts_bp):
+    from routes.materials import materials_bp
+    for blueprint in (services_bp, appointments_bp, reviews_bp, portfolio_bp, contacts_bp, users_bp, charts_bp, materials_bp):
         app.register_blueprint(blueprint)
     from security import protect_routes
     app.before_request(protect_routes)
@@ -50,4 +51,5 @@ def create_app(test_config=None):
 
 if __name__ == "__main__":
     create_app().run()
+
 

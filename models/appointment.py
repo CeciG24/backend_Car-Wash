@@ -20,6 +20,7 @@ class Appointments(db.Model):
 
     id_service = db.Column(db.Integer, db.ForeignKey("services.id_service"), nullable=True)
     service = db.relationship("Services", back_populates="appointments")
+    pricing = db.relationship("AppointmentPrice", uselist=False, cascade="all, delete-orphan", lazy="joined")
 
     def to_dict(self):
         return {
@@ -32,7 +33,14 @@ class Appointments(db.Model):
             "status": self.status.value,
             "id_service": self.id_service,
             "servicio": self.service.name if self.service else None,
+            "amount": float(self.pricing.amount) if self.pricing else (self.service.price if self.service else None),
+            "amount_estimated": self.pricing is None,
         }
 
     def __repr__(self):
         return f'<Cita {self.id_appointment}>'
+
+class AppointmentPrice(db.Model):
+    __tablename__ = 'appointment_prices'
+    appointment_id = db.Column(db.Integer, db.ForeignKey('appointments.id_appointment'), primary_key=True)
+    amount = db.Column(db.Numeric(12, 2), nullable=False)
