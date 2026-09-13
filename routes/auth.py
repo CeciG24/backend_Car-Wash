@@ -1,81 +1,61 @@
-from flask import Blueprint
-from flask import request, jsonify
-from flask import Blueprint, request, jsonify
+import bcrypt
+import click
+from flask import Blueprint, jsonify, current_app, g
+from werkzeug.exceptions import BadRequest, Conflict, Unauthorized, Forbidden
 from models import db
 from models.user import User
-import bcrypt
-import jwt
-import datetime
+from security import serializer, is_admin
+from validation import payload, text
 
-users_bp = Blueprint('auth', __name__)
-SECRET_KEY = "2bb67919602a41a3a12197d991c4edb0"  # Usa variable de entorno real
+users_bp = Blueprint("auth", __name__)
 
-# -------------------------
-# REGISTRO
-# -------------------------
+def create_user(data):
+    name = text(data, "nombre")
+    email = text(data, "email").lower()
+    password = text(data, "contraseña", 72)
+    if "@" not in email or len(password) < 8 or len(password.encode("utf-8")) > 72:
+        raise BadRequest("Correo inválido o contraseña menor de 8 caracteres / mayor de 72 bytes")
+    if User.query.filter_by(email=email).first():
+        raise Conflict("El correo ya está registrado")
+    user = User(nombre=name, email=email,
+                contraseña_hash=bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode())
+    db.session.add(user)
+    db.session.commit()
+    return user
+
 @users_bp.route("/register", methods=["POST"])
 def register():
-    data = request.get_json()
+    create_user(payload())
+    return jsonify(message="Usuario registrado exitosamente"), 201
 
-    nombre = data.get("nombre")
-    email = data.get("email")
-    contraseña = data.get("contraseña")
-
-    if not all([nombre, email, contraseña]):
-        return jsonify({"error": "Faltan campos"}), 400
-
-    # Verificar si el email ya existe
-    if User.query.filter_by(email=email).first():
-        return jsonify({"error": "El correo ya está registrado"}), 400
-
-    # Hash de contraseña
-    hashed = bcrypt.hashpw(contraseña.encode("utf-8"), bcrypt.gensalt())
-
-    # Crear usuario
-    nuevo_usuario = User(
-        nombre=nombre,
-        email=email,
-        contraseña_hash=hashed.decode("utf-8")
-    )
-
-    db.session.add(nuevo_usuario)
-    db.session.commit()
-
-    return jsonify({"message": "Usuario registrado exitosamente"}), 201
-
-
-# -------------------------
-# LOGIN
-# -------------------------
 @users_bp.route("/login", methods=["POST"])
 def login():
-    data = request.get_json()
+    data = payload()
+    email = text(data, "email").lower()
+    password = text(data, "contraseña", 72)
+    if len(password.encode()) > 72:
+        raise Unauthorized("Credenciales incorrectas")
+    user = User.query.filter_by(email=email).first()
+    if not user or not bcrypt.checkpw(password.encode(), user.contraseña_hash.encode()):
+        raise Unauthorized("Credenciales incorrectas")
+    if not is_admin(user):
+        raise Forbidden("Esta cuenta no tiene acceso administrativo")
+    token = serializer().dumps({"user_id": user.id_usuario})
+    return jsonify(token=token, expires_in=current_app.config["AUTH_TOKEN_MAX_AGE"])
 
-    email = data.get("email")
-    contraseña = data.get("contraseña")
+@users_bp.route("/user/me", methods=["GET"])
+def me():
+    return jsonify(id_usuario=g.user.id_usuario, nombre=g.user.nombre,
+                   email=g.user.email, rol="admin")
 
-    if not all([email, contraseña]):
-        return jsonify({"error": "Faltan campos"}), 400
+def register_commands(app):
+    @app.cli.command("create-admin")
+    @click.option("--email", prompt=True)
+    @click.option("--nombre", prompt=True)
+    @click.password_option()
+    def create_admin(email, nombre, password):
+        if email.lower() not in app.config["ADMIN_EMAILS"]:
+            raise click.ClickException("Agrega primero este correo a ADMIN_EMAILS")
+        create_user({"email": email, "nombre": nombre, "contraseña": password})
+        click.echo("Administrador creado.")
 
-    usuario = User.query.filter_by(email=email).first()
-
-    if not usuario:
-        return jsonify({"error": "Usuario no encontrado"}), 404
-
-    # Verificar contraseña
-    if not bcrypt.checkpw(contraseña.encode("utf-8"), usuario.contraseña_hash.encode("utf-8")):
-        return jsonify({"error": "Contraseña incorrecta"}), 401
-
-    # Crear JWT válido por 24 horas
-    token = jwt.encode(
-        {
-            "id_usuario": usuario.id_usuario,
-            "email": usuario.email,
-            "rol": usuario.rol.value,
-            "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=24)
-        },
-        SECRET_KEY,
-        algorithm="HS256"
-    )
-
-    return jsonify({"token": token}), 200

@@ -1,50 +1,45 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify
 from models import db
-from models.appointment import Appointments
-from datetime import datetime
+from models.appointment import Appointments, statusEnum
+from models.services import Services
+from validation import payload, text, date_value, existing, enum_value
 
-appointments_bp = Blueprint('appointments', __name__, url_prefix='/appointments')
+appointments_bp = Blueprint("appointments", __name__, url_prefix="/appointments")
 
-# Endpoint para crear una nueva cita
-@appointments_bp.route("/", methods=['POST'])
+def apply_data(item, data, creating=False):
+    for key, attr in (("name", "name"), ("numero_whatsapp", "num_whatsapp"), ("direccion", "direccion")):
+        if creating or key in data:
+            setattr(item, attr, text(data, key))
+    if creating or "scheduled_date" in data:
+        item.scheduled_date = date_value(data.get("scheduled_date"), future=True)
+    if creating or "id_service" in data:
+        item.id_service = existing(Services, data.get("id_service")).id_service
+    if not creating and "status" in data:
+        item.status = enum_value(statusEnum, data["status"], "status")
+
+@appointments_bp.route("", methods=["POST"])
 def post_appointment():
-    try:
-        data = request.get_json()
-        print("Received data:", data)  # Log the incoming data
+    item = Appointments()
+    apply_data(item, payload(), True)
+    item.status = statusEnum.PENDING
+    db.session.add(item)
+    db.session.commit()
+    return jsonify(message="Cita creada exitosamente", id_appointment=item.id_appointment), 201
 
-        nombre = data.get("name")
-        num = data.get("numero_whatsapp")
-        direccion = data.get("direccion")
-        date = data.get("scheduled_date")
-        servicio = data.get("id_service")
-
-        if not all([nombre, num, direccion, date]):
-            return jsonify({"error": "Faltan campos"}), 400
-
-        # Crear usuario
-        nueva_cita = Appointments(
-            name=nombre,
-            num_whatsapp=num,
-            direccion=direccion,
-            scheduled_date=datetime.fromisoformat(date),  # Ensure correct date format
-            id_service=servicio
-        )
-
-        db.session.add(nueva_cita)
-        db.session.commit()
-
-        return jsonify({"message": "Cita creada exitosamente"}), 201
-    except Exception as e:
-        print("Error:", str(e))  # Log the exception
-        return jsonify({"error": f"Error al crear cita: {str(e)}"}), 500
-    
-# Endpoint para obtener todas las citas
-@appointments_bp.route("/", methods=['GET'])
+@appointments_bp.route("", methods=["GET"])
 def get_appointments():
-    try:
-        citas = Appointments.query.all()
-        citas_list = [cita.to_dict() for cita in citas]  # Assuming to_dict method exists in Appointments model
-        return jsonify(citas_list), 200
-    except Exception as e:
-        print("Error:", str(e))  # Log the exception
-        return jsonify({"error": f"Error al obtener citas: {str(e)}"}), 500 
+    return jsonify([item.to_dict() for item in Appointments.query.order_by(Appointments.scheduled_date).all()])
+
+@appointments_bp.route("/<int:identifier>", methods=["GET", "PUT", "DELETE"])
+def appointment(identifier):
+    from flask import request
+    item = existing(Appointments, identifier)
+    if request.method == "GET":
+        return jsonify(item.to_dict())
+    if request.method == "PUT":
+        apply_data(item, payload())
+    else:
+        db.session.delete(item)
+    db.session.commit()
+    return jsonify(message="Cita actualizada" if request.method == "PUT" else "Cita eliminada")
+

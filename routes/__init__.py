@@ -4,5 +4,6 @@ from .reviews import reviews_bp
 from .portfolio import portfolio_bp
 from .contacts import contacts_bp
 from .auth import users_bp
+from .charts import charts_bp
 
-__all__ = ['services_bp', 'appointments_bp', 'reviews_bp', 'portfolio_bp', 'contacts_bp', 'users_bp']
+__all__ = ['services_bp', 'appointments_bp', 'reviews_bp', 'portfolio_bp', 'contacts_bp', 'users_bp', 'charts_bp']
