@@ -94,10 +94,11 @@ Al iniciar, create_all crea las tablas nuevas. La agenda usa
 appointment_write_lock para que la comprobación de cupo y el guardado se
 realicen en la misma transacción, incluso con varias instancias del servidor.
 
-Para una base de Supabase existente, aplica la migración SQL en
-supabase/migrations antes de desplegar la API de servicios. La migración deja
-la duración pendiente de captura y clasifica por nombre los servicios de
-detallado de interiores y exterior.
+Para una base de Supabase existente, aplica `service_categories_and_duration`
+antes de desplegar la API de servicios. La migración deja la duración pendiente
+de captura y clasifica por nombre los servicios de detallado de interiores y
+exterior. Después de iniciar la API y crear las tablas de reserva, aplica
+`restrict_booking_tables` para limitar su acceso directo desde Supabase.
 
 ## Pruebas
 
