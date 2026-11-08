@@ -1,11 +1,17 @@
 from datetime import datetime
 from . import db
+from .services import VehiculoEnum
 import enum
 
 class statusEnum(enum.Enum):
     PENDING = "Pending"
     COMPLETED = "Completed"
     CANCELED = "Canceled"
+
+
+# A shared database row serializes changes to the appointment calendar.
+db.Table("appointment_write_lock", db.Column("id", db.Integer, primary_key=True))
+
 
 class Appointments(db.Model):
     __tablename__ = 'appointments'
@@ -21,6 +27,13 @@ class Appointments(db.Model):
     id_service = db.Column(db.Integer, db.ForeignKey("services.id_service"), nullable=True)
     service = db.relationship("Services", back_populates="appointments")
     pricing = db.relationship("AppointmentPrice", uselist=False, cascade="all, delete-orphan", lazy="joined")
+    vehicle_selection = db.relationship("AppointmentVehicle", uselist=False, cascade="all, delete-orphan", lazy="joined")
+
+    @property
+    def vehicle(self):
+        if self.vehicle_selection:
+            return self.vehicle_selection.vehicle
+        return self.service.vehiculo if self.service else None
 
     def to_dict(self):
         return {
@@ -33,6 +46,7 @@ class Appointments(db.Model):
             "status": self.status.value,
             "id_service": self.id_service,
             "servicio": self.service.name if self.service else None,
+            "vehiculo": self.vehicle.value if self.vehicle else None,
             "amount": float(self.pricing.amount) if self.pricing else (self.service.price if self.service else None),
             "amount_estimated": self.pricing is None,
         }
@@ -44,3 +58,9 @@ class AppointmentPrice(db.Model):
     __tablename__ = 'appointment_prices'
     appointment_id = db.Column(db.Integer, db.ForeignKey('appointments.id_appointment'), primary_key=True)
     amount = db.Column(db.Numeric(12, 2), nullable=False)
+
+
+class AppointmentVehicle(db.Model):
+    __tablename__ = 'appointment_vehicles'
+    appointment_id = db.Column(db.Integer, db.ForeignKey('appointments.id_appointment'), primary_key=True)
+    vehicle = db.Column(db.Enum(VehiculoEnum, name="vehiculo_enum"), nullable=False)

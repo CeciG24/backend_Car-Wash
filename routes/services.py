@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 from werkzeug.exceptions import Conflict
 from models import db
-from models.services import Services, VehiculoEnum, TipoEnum
+from models.services import CategoriaEnum, Services, TipoEnum, VehiculoEnum
 from models.serviceDescription import ServiceDescription
 from validation import payload, text, integer, enum_value, existing
 
@@ -9,7 +9,9 @@ services_bp = Blueprint("services", __name__, url_prefix="/services")
 
 def serialize(item):
     return {"id_servicio": item.id_service, "nombre": item.name, "precio": item.price,
-            "tipo": item.tipo.value, "vehiculo": item.vehiculo.value if item.vehiculo else None}
+            "tipo": item.tipo.value if item.tipo else None,
+            "vehiculo": item.vehiculo.value if item.vehiculo else None,
+            "categoria": item.categoria, "duracion_minutos": item.duracion_minutos}
 
 def description_json(item):
     return {"id_description": item.id_description, "id_servicio": item.service_id,
@@ -20,8 +22,15 @@ def apply_data(item, data, creating=False):
         item.name = text(data, "name")
     if creating or "price" in data:
         item.price = integer(data.get("price"), "price")
-    if creating or "tipo" in data:
-        item.tipo = enum_value(TipoEnum, data.get("tipo"), "tipo")
+    if "tipo" in data:
+        tipo = data["tipo"]
+        item.tipo = None if tipo in (None, "") else enum_value(TipoEnum, tipo, "tipo")
+    if "categoria" in data:
+        categoria = data["categoria"]
+        item.categoria = None if categoria in (None, "") else enum_value(CategoriaEnum, categoria, "categoria").value
+    if "duracion_minutos" in data:
+        duration = data["duracion_minutos"]
+        item.duracion_minutos = None if duration is None else integer(duration, "duracion_minutos", 1, 2_147_483_647)
     if "vehiculo" in data:
         item.vehiculo = enum_value(VehiculoEnum, data["vehiculo"], "vehiculo") if data["vehiculo"] else None
 

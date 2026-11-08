@@ -40,9 +40,12 @@ README para ejecución, publicación y configuración del origen en CORS_ORIGINS
 
 ## Contratos principales
 
-- GET /services: { Servicios: [{ id_servicio, nombre, precio, tipo, vehiculo }] }
+- GET /services: { Servicios: [{ id_servicio, nombre, precio, tipo, vehiculo,
+  categoria, duracion_minutos }] }
 - GET /services/:id: { Servicio: {...} }
-- POST /services: name, price (entero no negativo), tipo, vehiculo opcional.
+- POST /services: name y price (entero no negativo). vehiculo, tipo (paquete de
+  lavado), categoria y duracion_minutos son opcionales. La duración, si se
+  captura, se expresa como un entero positivo en minutos.
 - PUT y DELETE /services/:id: privados. No se puede eliminar un servicio asociado
   a citas o videos.
 - GET /services/descriptions/:id: el id es del servicio; devuelve Descripcion
@@ -50,7 +53,16 @@ README para ejecución, publicación y configuración del origen en CORS_ORIGINS
 - POST /services/descriptions: service_id, description, order opcional.
 - PUT y DELETE /services/descriptions/:id: el id es de la descripción.
 - POST /appointments: público; name, numero_whatsapp, direccion,
-  scheduled_date (ISO 8601 con zona horaria), id_service.
+  scheduled_date (ISO 8601 con zona horaria), id_service. Admite vehiculo y
+  email para el formulario público. Los servicios sin tipo de vehículo están
+  disponibles para todos los tipos.
+  Si recibe email, usa la configuración MAIL del servidor para enviar el folio
+  de la solicitud. confirmation_email_sent indica si se pudo enviar. La cita
+  se guarda como pendiente aunque falle el correo.
+  La agenda tiene un cupo por fecha y hora de inicio, con precisión de minuto.
+  Si el cupo ya se ocupó, devuelve 409 con code `appointment_slot_taken`.
+  Cancelar, eliminar o mover la cita libera el horario si queda libre de otras
+  citas anteriores. La regla también aplica al reprogramar o reactivar una cita.
 - GET /appointments, GET/PUT/DELETE /appointments/:id: privados.
   PUT permite editar datos y status: Pending, Completed, Canceled.
 - GET /portfolio: público; { Servicios: [{ id_servicio, service_id, carro,
@@ -78,15 +90,18 @@ Las fechas nuevas se normalizan a UTC. Los datos históricos sin zona horaria
 se consideran UTC; si se almacenaron con hora local, necesitan revisión antes
 de convertirlos. No se han modificado registros históricos.
 
-Los modelos existentes se conservan; create_all crea tablas ausentes, pero no
-migra tablas existentes. El inventario agrega materials y stock_movements;
-es necesario desplegar el backend actualizado antes de usarlo desde el panel.
-Estados de publicación de videos, cupos de agenda y migraciones de esquema
-quedan para sus módulos posteriores.
+Al iniciar, create_all crea las tablas nuevas. La agenda usa
+appointment_write_lock para que la comprobación de cupo y el guardado se
+realicen en la misma transacción, incluso con varias instancias del servidor.
+
+Para una base de Supabase existente, aplica la migración SQL en
+supabase/migrations antes de desplegar la API de servicios. La migración deja
+la duración pendiente de captura y clasifica por nombre los servicios de
+detallado de interiores y exterior.
 
 ## Pruebas
 
 python -m unittest discover -s tests -v
 
-Las pruebas usan SQLite en memoria y suprimen los correos. No acceden a la BD real.
+Las pruebas usan SQLite desechable y suprimen los correos.
 

@@ -16,14 +16,28 @@ class VehiculoEnum(enum.Enum):
     PICKUP="Pickup"
     PICKUP_G="Pickup grande"
 
+
+class CategoriaEnum(enum.Enum):
+    LAVADO = "Lavado"
+    INTERIORES = "Detallado de interiores"
+    EXTERIOR = "Detallado exterior"
+    PULIDO = "Pulido y corrección"
+    PINTURA = "Pintura"
+    PROTECCION = "Protección"
+    OTRO = "Otro"
+
+
 class Services(db.Model):
     __tablename__ = 'services'
+    __table_args__ = (db.CheckConstraint("duracion_minutos > 0", name="services_duration_positive"),)
     
     id_service = db.Column(db.Integer, primary_key=True, autoincrement=True)
     name=db.Column(db.String(100), nullable=False)
     price=db.Column(db.Integer, nullable=False)
-    tipo=db.Column(db.Enum(TipoEnum, name="tipo_enum"),nullable=False)
+    tipo=db.Column(db.Enum(TipoEnum, name="tipo_enum"),nullable=True)
     vehiculo=db.Column(db.Enum(VehiculoEnum, name="vehiculo_enum"),nullable=True)
+    categoria = db.Column(db.String(60))
+    duracion_minutos = db.Column(db.Integer)
 
     descriptions = db.relationship("ServiceDescription", back_populates="service", cascade="all, delete-orphan")
     appointments = db.relationship("Appointments", back_populates="service")

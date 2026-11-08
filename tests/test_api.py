@@ -1,11 +1,16 @@
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+from threading import Barrier
 from unittest.mock import patch
 import bcrypt
 from app import create_app
 from models import db
 from models.user import User
 from models.appointment import Appointments
+from models.services import Services, TipoEnum
 from extensions import mail
 
 class ApiTests(unittest.TestCase):
@@ -92,12 +97,97 @@ class ApiTests(unittest.TestCase):
             self.assertIn(result.status_code, (400, 404))
         self.assertEqual(Appointments.query.count(), 0)
 
+    def test_slot_conflict_and_release_in_admin_edits(self):
+        start = (datetime.now(timezone.utc) + timedelta(days=3)).replace(second=0, microsecond=0)
+        booking = {**self.booking(), "scheduled_date": start.isoformat()}
+        first = self.client.post("/appointments", json=booking).json["id_appointment"]
+        first_url = f"/appointments/{first}"
+        same_minute = (start + timedelta(seconds=30)).astimezone(timezone(timedelta(hours=-6)))
+        conflict = self.client.post("/appointments", json={**booking, "scheduled_date": same_minute.isoformat()})
+        self.assertEqual(conflict.status_code, 409)
+        self.assertEqual(conflict.json["code"], "appointment_slot_taken")
+
+        next_slot = (start + timedelta(hours=1)).isoformat()
+        second = self.client.post("/appointments", json={**booking, "scheduled_date": next_slot}).json["id_appointment"]
+        conflict = self.client.put(first_url, headers=self.headers,
+                                   json={"scheduled_date": next_slot, "id_service": self.service_id})
+        self.assertEqual(conflict.status_code, 409)
+        self.assertEqual(self.client.put(first_url, headers=self.headers, json={"status": "Canceled"}).status_code, 200)
+        replacement = self.client.post("/appointments", json=booking)
+        self.assertEqual(replacement.status_code, 201)
+        self.assertEqual(self.client.put(first_url, headers=self.headers, json={"status": "Pending"}).status_code, 409)
+
+        second_url = f"/appointments/{second}"
+        self.assertEqual(self.client.delete(second_url, headers=self.headers).status_code, 200)
+        reopened = self.client.put(first_url, headers=self.headers,
+                                   json={"status": "Pending", "scheduled_date": next_slot, "id_service": self.service_id})
+        self.assertEqual(reopened.status_code, 200)
+
+    def test_booking_sends_receipt_and_records_vehicle_for_shared_service(self):
+        service = self.client.post("/services", headers=self.headers,
+                                   json={"name": "Lavado general", "price": 200, "tipo": "BASICO"}).json
+        with mail.record_messages() as outbox:
+            response = self.client.post("/appointments", json={
+                **self.booking(), "id_service": service["id_service"],
+                "vehiculo": "Moto", "email": "cliente@example.test",
+            })
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.json["confirmation_email_sent"])
+        self.assertEqual(len(outbox), 1)
+        self.assertEqual(outbox[0].recipients, ["cliente@example.test"])
+        identifier = response.json["id_appointment"]
+        self.assertIn(f"Folio: {identifier}", outbox[0].body)
+        self.assertIn("Vehículo: Moto", outbox[0].body)
+        row = self.client.get(f"/appointments/{identifier}", headers=self.headers).json
+        self.assertEqual(row["vehiculo"], "Moto")
+        self.assertEqual(row["status"], "Pending")
+
+    def test_invalid_vehicle_or_email_does_not_create_a_booking(self):
+        for update in ({"vehiculo": "Moto"}, {"email": "cliente@example.test, otro@example.test"}):
+            response = self.client.post("/appointments", json={**self.booking(), **update})
+            self.assertEqual(response.status_code, 400)
+        self.assertEqual(Appointments.query.count(), 0)
+
+    def test_booking_remains_saved_if_receipt_cannot_be_sent(self):
+        with patch.object(mail, "send", side_effect=OSError):
+            response = self.client.post("/appointments", json={
+                **self.booking(), "vehiculo": "SUV Grande", "email": "cliente@example.test",
+            })
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(response.json["confirmation_email_sent"])
+        self.assertIsNotNone(db.session.get(Appointments, response.json["id_appointment"]))
+
     def test_service_validation_and_recovery(self):
         for update in ({"price": -1}, {"price": 1.5}, {"tipo": "bad"}, {"vehiculo": "bad"}, {"name": ""}):
             response = self.client.put(f"/services/{self.service_id}", json=update, headers=self.headers)
             self.assertEqual(response.status_code, 400)
         self.assertEqual(self.client.get(f"/services/{self.service_id}").json["Servicio"]["precio"], 200)
         self.assertEqual(self.client.get("/services/999").status_code, 404)
+
+    def test_service_duration_and_category_with_optional_package(self):
+        response = self.client.post("/services", headers=self.headers, json={
+            "name": "Pulido", "price": 600, "categoria": "Pulido y corrección", "duracion_minutos": 90,
+        })
+        self.assertEqual(response.status_code, 201)
+        item = response.json["service"]
+        self.assertEqual(item["categoria"], "Pulido y corrección")
+        self.assertEqual(item["duracion_minutos"], 90)
+        self.assertIsNone(item["tipo"])
+
+        path = f"/services/{self.service_id}"
+        response = self.client.put(path, headers=self.headers, json={"duracion_minutos": 45})
+        self.assertEqual(response.status_code, 200)
+        item = self.client.get(path).json["Servicio"]
+        self.assertEqual((item["tipo"], item["duracion_minutos"]), ("Premium", 45))
+
+        for changes in ({"duracion_minutos": 0}, {"duracion_minutos": -1},
+                        {"duracion_minutos": 1.5}, {"categoria": "sin registrar"}):
+            self.assertEqual(self.client.put(path, headers=self.headers, json=changes).status_code, 400)
+        response = self.client.put(path, headers=self.headers, json={"tipo": "", "duracion_minutos": None})
+        self.assertEqual(response.status_code, 200)
+        item = self.client.get(path).json["Servicio"]
+        self.assertIsNone(item["tipo"])
+        self.assertIsNone(item["duracion_minutos"])
 
     def test_portfolio_crud(self):
         response = self.client.post("/portfolio/", headers=self.headers, json={
@@ -134,6 +224,41 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.post("/reviews", data="{", content_type="application/json").status_code, 400)
         self.assertEqual(self.client.post("/login", json={"email": "owner@example.test", "contraseña": "wrong"}).status_code, 401)
         self.assertEqual(self.client.post("/register", headers=self.headers, json={"nombre": "Owner", "email": "owner@example.test", "contraseña": "password123"}).status_code, 409)
+
+class ConcurrentBookingTests(unittest.TestCase):
+    def test_only_one_request_claims_the_last_slot(self):
+        # A file-backed database lets both requests use separate connections.
+        with NamedTemporaryFile(dir=Path(__file__).resolve().parents[1], suffix=".sqlite3", delete=False) as temp:
+            database = Path(temp.name)
+        self.addCleanup(database.unlink)
+        app = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite:///" + database.as_posix(),
+                          "MAIL_SUPPRESS_SEND": True})
+        with app.app_context():
+            self.addCleanup(db.engine.dispose)
+            service = Services(name="Lavado", price=200, tipo=TipoEnum.BASICO)
+            db.session.add(service)
+            db.session.commit()
+            service_id = service.id_service
+        start = Barrier(2)
+        date = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+
+        def book(number):
+            with app.test_client() as client:
+                start.wait(timeout=5)
+                return client.post("/appointments", json={
+                    "name": f"Cliente {number}", "numero_whatsapp": "2221234567",
+                    "direccion": "Calle 1", "scheduled_date": date,
+                    "id_service": service_id, "email": f"cliente{number}@example.test",
+                })
+
+        with patch("routes.appointments.send_confirmation", return_value=True) as send_confirmation:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results = list(pool.map(book, (1, 2)))
+            send_confirmation.assert_called_once()
+        self.assertCountEqual([result.status_code for result in results], [201, 409])
+        with app.app_context():
+            self.assertEqual(Appointments.query.count(), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
