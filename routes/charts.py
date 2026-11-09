@@ -85,7 +85,7 @@ def get_monthly_revenue():
         appointments = Appointments.query.filter_by(status=statusEnum.COMPLETED).all()
         for appointment in appointments:
             month = appointment.scheduled_date.strftime('%Y-%m')
-            service_price = appointment.service.price if appointment.service else 0
+            service_price = appointment.amount or 0
             if month in monthly_revenue:
                 monthly_revenue[month] += service_price
             else:

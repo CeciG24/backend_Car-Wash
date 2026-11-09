@@ -28,12 +28,19 @@ class Appointments(db.Model):
     service = db.relationship("Services", back_populates="appointments")
     pricing = db.relationship("AppointmentPrice", uselist=False, cascade="all, delete-orphan", lazy="joined")
     vehicle_selection = db.relationship("AppointmentVehicle", uselist=False, cascade="all, delete-orphan", lazy="joined")
+    extras = db.relationship("AppointmentExtra", cascade="all, delete-orphan", lazy="selectin",
+                             order_by="AppointmentExtra.service_id")
 
     @property
     def vehicle(self):
         if self.vehicle_selection:
             return self.vehicle_selection.vehicle
         return self.service.vehiculo if self.service else None
+
+    @property
+    def amount(self):
+        base = float(self.pricing.amount) if self.pricing else (self.service.price if self.service else None)
+        return base + sum(extra.amount for extra in self.extras) if base is not None else None
 
     def to_dict(self):
         return {
@@ -47,7 +54,9 @@ class Appointments(db.Model):
             "id_service": self.id_service,
             "servicio": self.service.name if self.service else None,
             "vehiculo": self.vehicle.value if self.vehicle else None,
-            "amount": float(self.pricing.amount) if self.pricing else (self.service.price if self.service else None),
+            "extras": [{"id_servicio": extra.service_id, "nombre": extra.service.name, "precio": extra.amount}
+                       for extra in self.extras],
+            "amount": self.amount,
             "amount_estimated": self.pricing is None,
         }
 
@@ -64,3 +73,11 @@ class AppointmentVehicle(db.Model):
     __tablename__ = 'appointment_vehicles'
     appointment_id = db.Column(db.Integer, db.ForeignKey('appointments.id_appointment'), primary_key=True)
     vehicle = db.Column(db.Enum(VehiculoEnum, name="vehiculo_enum"), nullable=False)
+
+
+class AppointmentExtra(db.Model):
+    __tablename__ = 'appointment_extras'
+    appointment_id = db.Column(db.Integer, db.ForeignKey('appointments.id_appointment', ondelete='CASCADE'), primary_key=True)
+    service_id = db.Column(db.Integer, db.ForeignKey('services.id_service'), primary_key=True, index=True)
+    amount = db.Column(db.Integer, nullable=False)
+    service = db.relationship("Services", lazy="joined")

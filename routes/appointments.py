@@ -6,9 +6,9 @@ from pytz import timezone as named_timezone
 from werkzeug.exceptions import BadRequest, Conflict
 from extensions import mail
 from models import db
-from models.appointment import Appointments, AppointmentPrice, AppointmentVehicle, statusEnum
+from models.appointment import AppointmentExtra, Appointments, AppointmentPrice, AppointmentVehicle, statusEnum
 from models.services import Services, VehiculoEnum
-from validation import payload, text, date_value, existing, enum_value
+from validation import payload, text, date_value, existing, enum_value, integer
 
 appointments_bp = Blueprint("appointments", __name__, url_prefix="/appointments")
 MEXICO_CITY = named_timezone("America/Mexico_City")
@@ -50,6 +50,22 @@ def ensure_slot_available(start):
         raise AppointmentSlotTaken()
 
 
+def add_extras(item, values):
+    if not isinstance(values, list):
+        raise BadRequest("Los extras deben enviarse como una lista")
+    ids = {integer(value, "ids_extras", 1, 2_147_483_647) for value in values}
+    if len(ids) != len(values):
+        raise BadRequest("Cada extra puede seleccionarse una sola vez")
+    if not ids:
+        return
+    extras = Services.query.filter(Services.id_service.in_(ids), Services.es_extra.is_(True)).all()
+    if len(extras) != len(ids):
+        raise BadRequest("Uno de los extras seleccionados ya no está disponible")
+    if any(extra.vehiculo and extra.vehiculo != item.vehicle for extra in extras):
+        raise BadRequest("Uno de los extras no está disponible para este vehículo")
+    item.extras = [AppointmentExtra(service=extra, amount=extra.price) for extra in extras]
+
+
 def apply_data(item, data, creating=False):
     for key, attr in (("name", "name"), ("numero_whatsapp", "num_whatsapp"), ("direccion", "direccion")):
         if creating or key in data:
@@ -59,8 +75,12 @@ def apply_data(item, data, creating=False):
     if creating or "id_service" in data:
         service = existing(Services, data.get("id_service"))
         if creating or service.id_service != item.id_service:
+            if service.es_extra:
+                raise BadRequest("Selecciona un servicio principal para la cita")
+            if not creating and item.extras and service.vehiculo and service.vehiculo != item.vehicle:
+                raise BadRequest("El servicio principal no es compatible con el vehículo de esta cita")
             item.pricing = AppointmentPrice(amount=service.price)
-        item.id_service = service.id_service
+        item.service = service
         if creating and "vehiculo" in data:
             vehicle = enum_value(VehiculoEnum, data["vehiculo"], "vehiculo")
             if service.vehiculo and service.vehiculo != vehicle:
@@ -75,12 +95,14 @@ def send_confirmation(item, email):
         return False
     date = item.scheduled_date.replace(tzinfo=timezone.utc).astimezone(MEXICO_CITY)
     vehicle_line = f"Vehículo: {item.vehicle.value}\n" if item.vehicle else ""
+    extras_line = "Extras: " + ", ".join(extra.service.name for extra in item.extras) + "\n" if item.extras else ""
     message = Message(
         subject="LS 1713 | Recibimos tu solicitud de cita",
         recipients=[email],
         body=(f"Recibimos tu solicitud de cita con LS 1713.\n\n"
               f"Folio: {item.id_appointment}\n"
               f"Servicio: {item.service.name}\n"
+              f"{extras_line}"
               f"{vehicle_line}"
               f"Fecha solicitada: {date:%d/%m/%Y %H:%M} (hora de Ciudad de México)\n\n"
               "Tu solicitud quedó pendiente en nuestra agenda."),
@@ -100,10 +122,12 @@ def post_appointment():
     if email and not EMAIL_PATTERN.fullmatch(email):
         raise BadRequest("Ingresa un correo electrónico válido")
     item = Appointments()
-    apply_data(item, data, True)
-    item.status = statusEnum.PENDING
-    lock_calendar()
-    ensure_slot_available(slot_start(item.scheduled_date))
+    with db.session.no_autoflush:
+        apply_data(item, data, True)
+        add_extras(item, data.get("ids_extras", []))
+        item.status = statusEnum.PENDING
+        lock_calendar()
+        ensure_slot_available(slot_start(item.scheduled_date))
     db.session.add(item)
     db.session.commit()
     result = {"message": "Cita creada exitosamente", "id_appointment": item.id_appointment}

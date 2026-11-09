@@ -41,11 +41,12 @@ README para ejecución, publicación y configuración del origen en CORS_ORIGINS
 ## Contratos principales
 
 - GET /services: { Servicios: [{ id_servicio, nombre, precio, tipo, vehiculo,
-  categoria, duracion_minutos }] }
+  categoria, duracion_minutos, es_extra }] }
 - GET /services/:id: { Servicio: {...} }
 - POST /services: name y price (entero no negativo). vehiculo, tipo (paquete de
   lavado), categoria y duracion_minutos son opcionales. La duración, si se
-  captura, se expresa como un entero positivo en minutos.
+  captura, se expresa como un entero positivo en minutos. es_extra marca un
+  complemento y su valor predeterminado es false, incluso si el paquete es Extra.
 - PUT y DELETE /services/:id: privados. No se puede eliminar un servicio asociado
   a citas o videos.
 - GET /services/descriptions/:id: el id es del servicio; devuelve Descripcion
@@ -54,7 +55,9 @@ README para ejecución, publicación y configuración del origen en CORS_ORIGINS
 - PUT y DELETE /services/descriptions/:id: el id es de la descripción.
 - POST /appointments: público; name, numero_whatsapp, direccion,
   scheduled_date (ISO 8601 con zona horaria), id_service. Admite vehiculo y
-  email para el formulario público. Los servicios sin tipo de vehículo están
+  email para el formulario público, e ids_extras con los complementos compatibles.
+  Los extras forman parte de la misma cita y se guardan con su precio al reservar.
+  Los servicios sin tipo de vehículo están
   disponibles para todos los tipos.
   Si recibe email, usa la configuración MAIL del servidor para enviar el folio
   de la solicitud. confirmation_email_sent indica si se pudo enviar. La cita
@@ -99,6 +102,8 @@ antes de desplegar la API de servicios. La migración deja la duración pendient
 de captura y clasifica por nombre los servicios de detallado de interiores y
 exterior. Después de iniciar la API y crear las tablas de reserva, aplica
 `restrict_booking_tables` para limitar su acceso directo desde Supabase.
+Aplica `appointment_extras` antes de desplegar la versión que permite reservar
+complementos.
 
 ## Pruebas
 

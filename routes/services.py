@@ -1,7 +1,8 @@
 from flask import Blueprint, jsonify, request
-from werkzeug.exceptions import Conflict
+from werkzeug.exceptions import BadRequest, Conflict
 from models import db
 from models.services import CategoriaEnum, Services, TipoEnum, VehiculoEnum
+from models.appointment import AppointmentExtra
 from models.serviceDescription import ServiceDescription
 from validation import payload, text, integer, enum_value, existing
 
@@ -11,7 +12,7 @@ def serialize(item):
     return {"id_servicio": item.id_service, "nombre": item.name, "precio": item.price,
             "tipo": item.tipo.value if item.tipo else None,
             "vehiculo": item.vehiculo.value if item.vehiculo else None,
-            "categoria": item.categoria, "duracion_minutos": item.duracion_minutos}
+            "categoria": item.categoria, "duracion_minutos": item.duracion_minutos, "es_extra": item.es_extra}
 
 def description_json(item):
     return {"id_description": item.id_description, "id_servicio": item.service_id,
@@ -31,12 +32,16 @@ def apply_data(item, data, creating=False):
     if "duracion_minutos" in data:
         duration = data["duracion_minutos"]
         item.duracion_minutos = None if duration is None else integer(duration, "duracion_minutos", 1, 2_147_483_647)
+    if "es_extra" in data:
+        if not isinstance(data["es_extra"], bool):
+            raise BadRequest("Campo inválido: es_extra")
+        item.es_extra = data["es_extra"]
     if "vehiculo" in data:
         item.vehiculo = enum_value(VehiculoEnum, data["vehiculo"], "vehiculo") if data["vehiculo"] else None
 
 @services_bp.route("", methods=["GET", "POST"])
 def services():
-    if request.method == "GET":
+    if request.method in ("GET", "HEAD"):
         return jsonify(Servicios=[serialize(item) for item in Services.query.order_by(Services.id_service).all()])
     item = Services()
     apply_data(item, payload(), True)
@@ -47,12 +52,12 @@ def services():
 @services_bp.route("/<int:identifier>", methods=["GET", "PUT", "DELETE"])
 def service(identifier):
     item = existing(Services, identifier)
-    if request.method == "GET":
+    if request.method in ("GET", "HEAD"):
         return jsonify(Servicio=serialize(item))
     if request.method == "PUT":
         apply_data(item, payload())
     else:
-        if item.appointments or item.portfolio_services:
+        if item.appointments or item.portfolio_services or AppointmentExtra.query.filter_by(service_id=identifier).first():
             raise Conflict("El servicio está asociado a citas o videos; no puede eliminarse")
         db.session.delete(item)
     db.session.commit()

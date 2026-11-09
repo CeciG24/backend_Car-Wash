@@ -38,6 +38,7 @@ class Services(db.Model):
     vehiculo=db.Column(db.Enum(VehiculoEnum, name="vehiculo_enum"),nullable=True)
     categoria = db.Column(db.String(60))
     duracion_minutos = db.Column(db.Integer)
+    es_extra = db.Column(db.Boolean, nullable=False, server_default=db.false())
 
     descriptions = db.relationship("ServiceDescription", back_populates="service", cascade="all, delete-orphan")
     appointments = db.relationship("Appointments", back_populates="service")

@@ -189,6 +189,47 @@ class ApiTests(unittest.TestCase):
         self.assertIsNone(item["tipo"])
         self.assertIsNone(item["duracion_minutos"])
 
+    def test_booking_saves_multiple_extras_and_their_prices(self):
+        self.client.put(f"/services/{self.service_id}", headers=self.headers, json={"tipo": "Extra"})
+        extras = [
+            self.client.post("/services", headers=self.headers, json={
+                "name": name, "price": price, "es_extra": True, "vehiculo": vehicle,
+            }).json["id_service"]
+            for name, price, vehicle in (("Pulido de faros", 75, "SUV Grande"), ("Encerado", 50, None))
+        ]
+        with mail.record_messages() as outbox:
+            response = self.client.post("/appointments", json={
+                **self.booking(), "vehiculo": "SUV Grande", "ids_extras": extras,
+                "email": "cliente@example.test",
+            })
+        self.assertEqual(response.status_code, 201)
+        self.assertIn("Extras: Pulido de faros, Encerado", outbox[0].body)
+        path = f"/appointments/{response.json['id_appointment']}"
+        self.client.put(f"/services/{extras[0]}", headers=self.headers, json={"price": 100})
+        self.assertEqual(self.client.put(path, headers=self.headers, json={"status": "Completed"}).status_code, 200)
+        row = self.client.get(path, headers=self.headers).json
+        self.assertEqual(row["id_service"], self.service_id)
+        self.assertEqual([item["id_servicio"] for item in row["extras"]], extras)
+        self.assertEqual([item["precio"] for item in row["extras"]], [75, 50])
+        self.assertEqual(row["amount"], 325)
+        monthly = self.client.get("/charts/monthly-revenue", headers=self.headers).json
+        self.assertEqual(sum(monthly.values()), 325)
+        self.assertEqual(self.client.delete(f"/services/{extras[0]}", headers=self.headers).status_code, 409)
+        self.assertEqual(self.client.delete(path, headers=self.headers).status_code, 200)
+        self.assertEqual(self.client.delete(f"/services/{extras[0]}", headers=self.headers).status_code, 200)
+
+    def test_invalid_extras_leave_the_calendar_free(self):
+        extra = self.client.post("/services", headers=self.headers, json={
+            "name": "Faros", "price": 75, "es_extra": True, "vehiculo": "Auto",
+        }).json["id_service"]
+        booking = self.booking()
+        for changes in ({"ids_extras": [self.service_id]}, {"ids_extras": [extra]},
+                        {"ids_extras": [extra, extra]}, {"ids_extras": str(extra)},
+                        {"id_service": extra}):
+            self.assertEqual(self.client.post("/appointments", json={**booking, **changes}).status_code, 400)
+        self.assertEqual(Appointments.query.count(), 0)
+        self.assertEqual(self.client.post("/appointments", json=booking).status_code, 201)
+
     def test_portfolio_crud(self):
         response = self.client.post("/portfolio/", headers=self.headers, json={
             "car_model": "Jetta", "service_id": self.service_id,
